@@ -16,7 +16,6 @@ from PIL import Image, ImageDraw, ImageFont
 
 fake = Faker()
 OUT_DIR = Path(__file__).parent / "synthetic_data"
-OUT_DIR.mkdir(exist_ok=True)
 
 STATES = ["CO", "CA", "TX", "FL", "NY", "WA", "AZ", "OR", "NV", "UT"]
 LICENSE_CLASSES = ["A", "B", "C", "D", "M"]
@@ -38,6 +37,31 @@ ACCENT_COLORS = {
     "FL": "#0e6655",
     "NY": "#1a5276",
 }
+
+
+# Cross-platform font lookup (the original only looked in Linux's DejaVu path, so on
+# Windows/macOS every font silently fell back to the same bitmap default and the
+# "font_mismatch" fraud type was invisible).
+FONT_CANDIDATES = {
+    "regular": ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "C:/Windows/Fonts/arial.ttf",
+                "/System/Library/Fonts/Supplemental/Arial.ttf", "/Library/Fonts/Arial.ttf"],
+    "bold": ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "C:/Windows/Fonts/arialbd.ttf",
+             "/System/Library/Fonts/Supplemental/Arial Bold.ttf", "/Library/Fonts/Arial Bold.ttf"],
+    "mono": ["/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", "C:/Windows/Fonts/consola.ttf",
+             "C:/Windows/Fonts/cour.ttf", "/System/Library/Fonts/Menlo.ttc"],
+    "serif": ["/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf", "C:/Windows/Fonts/times.ttf",
+              "C:/Windows/Fonts/georgia.ttf", "/System/Library/Fonts/Supplemental/Times New Roman.ttf"],
+}
+
+
+def find_font(kind: str, size: int) -> ImageFont.FreeTypeFont:
+    for path in FONT_CANDIDATES.get(kind, []):
+        if os.path.exists(path):
+            return ImageFont.truetype(path, size)
+    try:
+        return ImageFont.load_default(size=size)  # Pillow >= 10.1 ships a scalable default
+    except TypeError:
+        return ImageFont.load_default()
 
 
 def random_license_number(state: str) -> str:
@@ -110,17 +134,13 @@ def draw_id_card(data: dict, fraud_type: str = "none") -> Image.Image:
     # Header bar
     draw.rectangle([(0, 0), (W, 70)], fill=accent)
 
-    # Deliberately bad font for fraud simulation
-    try:
-        title_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 24)
-        label_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 13)
-        value_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 15)
-        small_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 11)
-        if fraud_type == "font_mismatch":
-            # Use a noticeably different font for some fields to simulate fraud
-            value_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", 15)
-    except OSError:
-        title_font = label_font = value_font = small_font = ImageFont.load_default()
+    title_font = find_font("bold", 24)
+    label_font = find_font("bold", 13)
+    value_font = find_font("regular", 15)
+    small_font = find_font("regular", 11)
+    if fraud_type == "font_mismatch":
+        # Use a noticeably different font for some fields to simulate fraud
+        value_font = find_font("mono", 15)
 
     # State name and DL title
     draw.text((20, 15), f"STATE OF {state}", font=title_font, fill="white")
@@ -198,6 +218,7 @@ def draw_id_card(data: dict, fraud_type: str = "none") -> Image.Image:
 def generate_dataset(n_per_type: int = 5):
     """Generate n samples per fraud type."""
     fraud_types = ["none", "expired", "expiring_soon", "wrong_format", "font_mismatch", "glare"]
+    OUT_DIR.mkdir(exist_ok=True)
     manifest = []
 
     for ft in fraud_types:

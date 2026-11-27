@@ -230,3 +230,15 @@
 }
 
 .note-icon { flex-shrink: 0; }
+/* ── Demo mode + sample scenarios ───────────────────────────── */
+.demo-banner{display:flex;gap:14px;align-items:flex-start;margin:0 auto 24px;max-width:900px;padding:16px 20px;border-radius:14px;border:1px solid rgba(99,179,237,.35);background:rgba(99,179,237,.08);text-align:left;font-size:14px;line-height:1.55}
+.demo-banner span{font-size:20px}
+.demo-banner p{margin:4px 0 0;opacity:.85}
+.demo-banner a{color:inherit;text-decoration:underline}
+.scenario-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;max-width:900px;margin:18px auto 0}
+.scenario-card{display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:16px 18px;border-radius:14px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.03);color:inherit;cursor:pointer;text-align:left;font:inherit;transition:transform .2s,border-color .2s,background .2s}
+.scenario-card:hover{transform:translateY(-2px);border-color:rgba(255,255,255,.35);background:rgba(255,255,255,.06)}
+.scenario-emoji{font-size:22px}
+.scenario-label{font-weight:700;letter-spacing:.02em}
+.scenario-hint{font-size:12.5px;opacity:.7}
+@media (max-width:700px){.scenario-grid{grid-template-columns:1fr}}

@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { DEMO_SCENARIOS } from '../demoData.js'
 import './UploadPanel.css'
 
 function DropZone({ label, icon, accept, file, onFile, hint }) {
@@ -60,7 +61,7 @@ function DropZone({ label, icon, accept, file, onFile, hint }) {
 
 export default function UploadPanel({
   idFile, supportFile, onIdFile, onSupportFile,
-  onAnalyze, onDemo, error
+  onAnalyze, onDemo, error, demoMode
 }) {
   return (
     <div className="upload-panel">
@@ -68,6 +69,16 @@ export default function UploadPanel({
         <h2>Document Verification Pipeline</h2>
         <p>Upload an ID to run all four levels: authenticity check, field extraction, cross-document matching, and compliance flagging.</p>
       </div>
+
+      {demoMode && (
+        <div className="demo-banner fade-up">
+          <span>🧪</span>
+          <div>
+            <strong>Hosted demo mode</strong>
+            <p>This build has no backend, so live Claude Vision analysis is disabled. Load a synthetic scenario below to explore the full four-level report. <a href="https://github.com/kenkaneki132/Village-hackathon-2026#quick-start" target="_blank" rel="noopener">Run it locally</a> for real uploads.</p>
+          </div>
+        </div>
+      )}
 
       <div className="upload-grid fade-up fade-up-delay-1">
         <DropZone
@@ -92,16 +103,23 @@ export default function UploadPanel({
         <button
           className="btn-primary"
           onClick={onAnalyze}
-          disabled={!idFile}
+          disabled={!idFile || demoMode}
+          title={demoMode ? 'Requires the backend: see README' : undefined}
         >
           <span className="btn-icon">⚡</span>
           RUN FULL PIPELINE
         </button>
 
-        <button className="btn-secondary" onClick={onDemo}>
-          <span className="btn-icon">🧪</span>
-          LOAD DEMO RESULT
-        </button>
+      </div>
+
+      <div className="scenario-grid fade-up fade-up-delay-2">
+        {DEMO_SCENARIOS.map((s) => (
+          <button key={s.id} className="scenario-card" onClick={() => onDemo(s.id)}>
+            <span className="scenario-emoji">{s.emoji}</span>
+            <span className="scenario-label">{s.label}</span>
+            <span className="scenario-hint">{s.hint}</span>
+          </button>
+        ))}
       </div>
 
       {error && (
