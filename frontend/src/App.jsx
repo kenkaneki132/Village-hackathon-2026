@@ -2,7 +2,9 @@ import { useState, useCallback } from 'react'
 import UploadPanel from './components/UploadPanel.jsx'
 import ResultsDashboard from './components/ResultsDashboard.jsx'
 import LoadingState from './components/LoadingState.jsx'
+import { verifyDocuments, loadDemo, DEMO_MODE } from './api.js'
 import './App.css'
+import PortfolioBadge from './components/PortfolioBadge'
 
 export default function App() {
   const [idFile, setIdFile] = useState(null)
@@ -18,16 +20,7 @@ export default function App() {
     setError(null)
 
     try {
-      const form = new FormData()
-      form.append('id_doc', idFile)
-      if (supportFile) form.append('support_doc', supportFile)
-
-      const res = await fetch('/verify', { method: 'POST', body: form })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: res.statusText }))
-        throw new Error(err.detail || `HTTP ${res.status}`)
-      }
-      const data = await res.json()
+      const data = await verifyDocuments(idFile, supportFile)
       setResult(data)
       setStatus('done')
     } catch (e) {
@@ -36,13 +29,12 @@ export default function App() {
     }
   }, [idFile, supportFile])
 
-  const handleDemo = useCallback(async () => {
+  const handleDemo = useCallback(async (scenarioId) => {
     setStatus('loading')
     setResult(null)
     setError(null)
     try {
-      const res = await fetch('/synthetic-test', { method: 'POST' })
-      const data = await res.json()
+      const data = await loadDemo(scenarioId)
       setResult(data)
       setStatus('done')
     } catch (e) {
@@ -86,6 +78,7 @@ export default function App() {
             onAnalyze={handleAnalyze}
             onDemo={handleDemo}
             error={error}
+            demoMode={DEMO_MODE}
           />
         ) : status === 'loading' ? (
           <LoadingState />
@@ -93,6 +86,7 @@ export default function App() {
           <ResultsDashboard result={result} onReset={handleReset} />
         )}
       </main>
+      <footer className="sm-badge-row"><PortfolioBadge /></footer>
     </div>
   )
 }

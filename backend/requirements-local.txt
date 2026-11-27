@@ -1,0 +1,13 @@
+# Optional local pre-screening models (heavy). The API works without these.
+# Also requires backend/weights/kid34k_resnet50.pth (not included in the repo).
+-r requirements.txt
+torch
+torchvision
+pillow
+paddleocr
+paddlepaddle
+deepface
+opencv-python
+mediapipe
+scikit-image
+numpy

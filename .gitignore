@@ -77,3 +77,6 @@ coverage/
 *.pem
 *.key
 *.crt
+# Training data (regenerate with training/make_tamper_dataset.py)
+backend/training/data/
+backend/synthetic_data/

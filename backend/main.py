@@ -19,18 +19,40 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+import os
 
-app = FastAPI(title="ID Verify AI", version="1.0.0")
+# Optional local models (torch, PaddleOCR, DeepFace, MediaPipe + weights/kid34k_resnet50.pth).
+# They are heavy, so the API also runs without them: Claude Vision then performs all four levels.
+try:
+    from models.pipeline import run_local_pipeline
+    LOCAL_MODELS_ERROR = None
+except Exception as _e:  # ImportError, missing weights, etc.
+    run_local_pipeline = None
+    LOCAL_MODELS_ERROR = f"{type(_e).__name__}: {_e}"
+
+MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
+
+app = FastAPI(title="ID Verify AI", version="1.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3000").split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY from env
+_client = None
+
+
+def get_client() -> anthropic.Anthropic:
+    """Create the Anthropic client lazily so the server (and /synthetic-test) still boots without a key."""
+    global _client
+    if _client is None:
+        if not os.getenv("ANTHROPIC_API_KEY"):
+            raise HTTPException(503, "ANTHROPIC_API_KEY is not set on the server. Use /synthetic-test or set the key in backend/.env.")
+        _client = anthropic.Anthropic()
+    return _client
 
 ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 MAX_FILE_SIZE_MB = 10
@@ -302,8 +324,8 @@ async def call_claude(id_bytes: bytes, id_mime: str,
     )
     content.append({"type": "text", "text": prompt})
 
-    message = client.messages.create(
-        model="claude-sonnet-4-20250514",
+    message = get_client().messages.create(
+        model=MODEL,
         max_tokens=4096,
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": content}],
@@ -355,7 +377,25 @@ def enrich_expiration(result: dict) -> dict:
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "model": "claude-sonnet-4-20250514"}
+    return {
+        "status": "ok",
+        "model": MODEL,
+        "anthropic_key_configured": bool(os.getenv("ANTHROPIC_API_KEY")),
+        "local_models": run_local_pipeline is not None,
+        "local_models_error": LOCAL_MODELS_ERROR,
+    }
+
+
+async def read_validated(upload: UploadFile, label: str) -> tuple[bytes, str]:
+    """Read an upload, enforcing image type and size limits."""
+    if upload.content_type not in ALLOWED_MIME_TYPES:
+        raise HTTPException(415, f"{label}: unsupported type {upload.content_type}. Use JPEG, PNG, WebP or GIF.")
+    data = await upload.read()
+    if len(data) > MAX_FILE_SIZE_MB * 1024 * 1024:
+        raise HTTPException(413, f"{label}: file exceeds {MAX_FILE_SIZE_MB}MB.")
+    if not data:
+        raise HTTPException(400, f"{label}: file is empty.")
+    return data, upload.content_type
 
 
 @app.post("/verify", response_model=VerificationResult)
@@ -366,26 +406,35 @@ async def verify(
 ):
     import time; t0 = time.time()
 
-    id_bytes      = await id_doc.read()
-    selfie_bytes  = await selfie.read()      if selfie      else None
-    doc2_bytes    = await support_doc.read() if support_doc else None
-    doc2_mime     = support_doc.content_type if support_doc else None
+    id_bytes, id_mime = await read_validated(id_doc, "ID document")
+    selfie_bytes = (await read_validated(selfie, "Selfie"))[0] if selfie else None
+    doc2_bytes, doc2_mime = (await read_validated(support_doc, "Supporting document")) if support_doc else (None, None)
 
-    # ── Stage 1-4: local models (fast, free) ──────────────────────
-    local = await run_local_pipeline(id_bytes, selfie_bytes)
+    # ── Stage 1-4: optional local models (fast, free) ─────────────
+    local = None
+    if run_local_pipeline is not None:
+        try:
+            local = await run_local_pipeline(id_bytes, selfie_bytes)
+        except Exception as e:  # never let an optional stage take down the request
+            local = {"local": {"error": f"{type(e).__name__}: {e}"}}
 
     # Early reject: if authenticity is FAIL + liveness is SPOOF, skip Claude
-    auth_score = local['local']['authenticity']['score']
-    live_ok    = local['local']['liveness']['verdict'] == 'LIVE' if selfie_bytes else True
-    if auth_score < 0.4 and not live_ok:
-        raise HTTPException(400, "Document failed authenticity and liveness checks")
+    auth = (local or {}).get("local", {}).get("authenticity") or {}
+    if "score" in auth:
+        auth_score = auth["score"]
+        live = local["local"].get("liveness")
+        live_ok = (live or {}).get("verdict") == "LIVE" if selfie_bytes else True
+        if auth_score < 0.4 and not live_ok:
+            raise HTTPException(400, "Document failed authenticity and liveness checks")
 
     # ── Stage 5: Claude Vision (LV1-LV4 structured output) ─────────
-    raw_result = await call_claude(id_bytes, id_doc.content_type,
-                                   doc2_bytes, doc2_mime)
+    try:
+        raw_result = await call_claude(id_bytes, id_mime, doc2_bytes, doc2_mime)
+    except (ValueError, json.JSONDecodeError) as e:
+        raise HTTPException(502, f"Model returned malformed JSON: {e}")
 
     # ── Merge local model scores into Claude's structured output ───
-    raw_result['local_models'] = local['local']
+    raw_result['local_models'] = local['local'] if local else None
     raw_result = enrich_expiration(raw_result)
     raw_result['processing_time_ms'] = int((time.time() - t0) * 1000)
 
